@@ -1,6 +1,7 @@
 import "./Home.css";
 import { Link } from "react-router-dom";
-import heroImage from "../assets/data-quality-Monitoring-min.jpg"
+import heroImage from "../assets/data-quality-monitoring-min.jpg";
+
 
 function Home() {
   return (
