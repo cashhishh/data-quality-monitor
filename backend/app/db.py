@@ -1,11 +1,7 @@
-import pyodbc
+import psycopg2
+import os
 
 def get_connection():
-    conn = pyodbc.connect(
-        "DRIVER={ODBC Driver 17 for SQL Server};"
-        "SERVER=localhost\\SQLEXPRESS;"
-        "DATABASE=DataQualityDB;"
-        "Trusted_Connection=yes;"
-        "Connection Timeout=30;"
+    return psycopg2.connect(
+        os.environ["DATABASE_URL"]
     )
-    return conn
