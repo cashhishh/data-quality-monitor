@@ -11,14 +11,12 @@ app = FastAPI(title="Data Quality Monitoring System")
 # ✅ ADD CORS AFTER app IS CREATED
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "https://dataquality-monitor.netlify.app"
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # ✅ ROUTES
 app.include_router(dataset_router)
