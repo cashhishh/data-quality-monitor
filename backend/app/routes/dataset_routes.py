@@ -1,16 +1,23 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from app.db import get_connection
+from app.services.validation_service import run_data_quality_checks
 import pandas as pd
 import json
 
 router = APIRouter(prefix="/datasets", tags=["Datasets"])
 
 
+# ---------------------------
+# Health Check
+# ---------------------------
 @router.get("/health")
 def health_check():
     return {"status": "Dataset routes working"}
 
 
+# ---------------------------
+# Create Dataset (metadata only)
+# ---------------------------
 @router.post("/create")
 def create_dataset(dataset_name: str):
     try:
@@ -28,6 +35,7 @@ def create_dataset(dataset_name: str):
 
         dataset_id = cursor.fetchone()[0]
         conn.commit()
+        conn.close()
 
         return {
             "message": "Dataset created",
@@ -38,19 +46,21 @@ def create_dataset(dataset_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ---------------------------
+# Upload Dataset (CSV)
+# ---------------------------
 @router.post("/upload")
 def upload_dataset(file: UploadFile = File(...)):
     if not file.filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only CSV files are allowed")
 
     try:
-        # Read CSV
         df = pd.read_csv(file.file)
 
         conn = get_connection()
         cursor = conn.cursor()
 
-        # Insert dataset
+        # create dataset entry
         cursor.execute(
             """
             INSERT INTO datasets (dataset_name)
@@ -62,20 +72,19 @@ def upload_dataset(file: UploadFile = File(...)):
 
         dataset_id = cursor.fetchone()[0]
 
-        # Insert rows
+        # insert rows
         for _, row in df.iterrows():
-            row_json = json.dumps(row.to_dict())
-
             cursor.execute(
                 """
                 INSERT INTO data_records (dataset_id, row_data)
                 VALUES (?, ?)
                 """,
                 dataset_id,
-                row_json
+                json.dumps(row.to_dict())
             )
 
         conn.commit()
+        conn.close()
 
         return {
             "message": "Dataset uploaded successfully",
@@ -86,34 +95,45 @@ def upload_dataset(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-from app.services.validation_service import run_data_quality_checks
 
-
+# ---------------------------
+# Run Data Quality Checks
+# ---------------------------
 @router.post("/run-checks/{dataset_id}")
-def _run_checks_sync(dataset_id: int):
-    print("STEP 1: Endpoint hit")
-
+def run_checks(dataset_id: int):
     conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        print("STEP 2: DB connection acquired")
 
         cursor.execute(
             "SELECT row_data FROM data_records WHERE dataset_id = ?",
             dataset_id
         )
         records = cursor.fetchall()
-        print(f"STEP 3: Fetched {len(records)} records")
 
         if not records:
-            return {"message": "No records found"}
+            raise HTTPException(status_code=404, detail="No records found")
 
-        print("STEP 4: Starting data quality checks")
-        results = run_data_quality_checks(records)
-        print("STEP 5: Checks completed")
+        # run checks
+        raw_results = run_data_quality_checks(records)
 
-        for check_type, issue_count in results.items():
+        # transform for frontend
+        checks = []
+        failed = 0
+        total = len(raw_results)
+
+        for check_type, issue_count in raw_results.items():
+            status = "PASS" if issue_count == 0 else "FAIL"
+            if status == "FAIL":
+                failed += 1
+
+            checks.append({
+                "check_name": check_type.replace("_", " ").upper(),
+                "status": status,
+                "failed_rows": issue_count
+            })
+
             cursor.execute(
                 """
                 INSERT INTO validation_results (dataset_id, check_type, issue_count)
@@ -124,19 +144,43 @@ def _run_checks_sync(dataset_id: int):
                 issue_count
             )
 
+        overall_score = int(((total - failed) / total) * 100)
+
         conn.commit()
-        print("STEP 6: Results committed")
 
         return {
             "dataset_id": dataset_id,
-            "results": results
+            "overall_score": overall_score,
+            "checks": checks
         }
 
     except Exception as e:
-        print("ERROR:", e)
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
     finally:
         if conn:
             conn.close()
-            print("STEP 7: DB connection closed")
+
+
+# ---------------------------
+# Get Latest Dataset ID
+# ---------------------------
+@router.get("/latest")
+def get_latest_dataset():
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT TOP 1 dataset_id
+            FROM datasets
+            ORDER BY dataset_id DESC
+        """)
+
+        row = cursor.fetchone()
+        conn.close()
+
+        return {"dataset_id": row[0] if row else None}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -2,6 +2,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from fastapi import FastAPI
 from app.routes.dataset_routes import router as dataset_router
+from app.routes.dashboard_routes import router as dashboard_router
+
 
 app = FastAPI(title="Data Quality Monitoring System")
 app.add_middleware(
@@ -14,6 +16,8 @@ app.add_middleware(
 
 
 app.include_router(dataset_router)
+app.include_router(dashboard_router)
+
 
 @app.get("/")
 def root():
