@@ -38,10 +38,9 @@ def root():
 @app.get("/db-test")
 def db_test():
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1")
-        conn.close()
+        from app.db import get_db
+        with get_db() as cursor:
+            cursor.execute("SELECT 1")
         return {"db_status": "connected"}
     except Exception as e:
         return {"db_status": "failed", "error": str(e)}
