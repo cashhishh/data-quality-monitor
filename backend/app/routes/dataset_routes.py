@@ -27,19 +27,20 @@ def create_dataset(dataset_name: str):
         cursor.execute(
             """
             INSERT INTO datasets (dataset_name)
-            OUTPUT INSERTED.dataset_id
-            VALUES (?)
+            VALUES (%s)
+            RETURNING dataset_id
             """,
-            dataset_name
+            (dataset_name,)
         )
 
         dataset_id = cursor.fetchone()[0]
         conn.commit()
+        cursor.close()
         conn.close()
 
         return {
             "message": "Dataset created",
-            "dataset_id": int(dataset_id)
+            "dataset_id": dataset_id
         }
 
     except Exception as e:
@@ -64,10 +65,10 @@ def upload_dataset(file: UploadFile = File(...)):
         cursor.execute(
             """
             INSERT INTO datasets (dataset_name)
-            OUTPUT INSERTED.dataset_id
-            VALUES (?)
+            VALUES (%s)
+            RETURNING dataset_id
             """,
-            file.filename
+            (file.filename,)
         )
 
         dataset_id = cursor.fetchone()[0]
@@ -77,18 +78,18 @@ def upload_dataset(file: UploadFile = File(...)):
             cursor.execute(
                 """
                 INSERT INTO data_records (dataset_id, row_data)
-                VALUES (?, ?)
+                VALUES (%s, %s)
                 """,
-                dataset_id,
-                json.dumps(row.to_dict())
+                (dataset_id, json.dumps(row.to_dict()))
             )
 
         conn.commit()
+        cursor.close()
         conn.close()
 
         return {
             "message": "Dataset uploaded successfully",
-            "dataset_id": int(dataset_id),
+            "dataset_id": dataset_id,
             "total_rows": len(df)
         }
 
@@ -101,24 +102,21 @@ def upload_dataset(file: UploadFile = File(...)):
 # ---------------------------
 @router.post("/run-checks/{dataset_id}")
 def run_checks(dataset_id: int):
-    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
-            "SELECT row_data FROM data_records WHERE dataset_id = ?",
-            dataset_id
+            "SELECT row_data FROM data_records WHERE dataset_id = %s",
+            (dataset_id,)
         )
         records = cursor.fetchall()
 
         if not records:
             raise HTTPException(status_code=404, detail="No records found")
 
-        # run checks
         raw_results = run_data_quality_checks(records)
 
-        # transform for frontend
         checks = []
         failed = 0
         total = len(raw_results)
@@ -137,16 +135,16 @@ def run_checks(dataset_id: int):
             cursor.execute(
                 """
                 INSERT INTO validation_results (dataset_id, check_type, issue_count)
-                VALUES (?, ?, ?)
+                VALUES (%s, %s, %s)
                 """,
-                dataset_id,
-                check_type,
-                issue_count
+                (dataset_id, check_type, issue_count)
             )
 
         overall_score = int(((total - failed) / total) * 100)
 
         conn.commit()
+        cursor.close()
+        conn.close()
 
         return {
             "dataset_id": dataset_id,
@@ -156,10 +154,6 @@ def run_checks(dataset_id: int):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-    finally:
-        if conn:
-            conn.close()
 
 
 # ---------------------------
@@ -171,13 +165,17 @@ def get_latest_dataset():
         conn = get_connection()
         cursor = conn.cursor()
 
-        cursor.execute("""
-            SELECT TOP 1 dataset_id
+        cursor.execute(
+            """
+            SELECT dataset_id
             FROM datasets
             ORDER BY dataset_id DESC
-        """)
+            LIMIT 1
+            """
+        )
 
         row = cursor.fetchone()
+        cursor.close()
         conn.close()
 
         return {"dataset_id": row[0] if row else None}
