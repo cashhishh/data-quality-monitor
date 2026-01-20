@@ -2,7 +2,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 from app.db import get_connection, get_db
 from app.services.validation_service import run_data_quality_checks
 import pandas as pd
-import json
+from psycopg2.extras import Json
 import logging
 import io
 
@@ -102,17 +102,18 @@ async def upload_dataset(file: UploadFile = File(...)):
             for i in range(0, total_rows, batch_size):
                 batch = df.iloc[i:i+batch_size]
                 for _, row in batch.iterrows():
-                    # Convert row to JSON, handling NaN values
+                    # Convert row to dict, handling NaN values
                     row_dict = row.to_dict()
-                    # Replace NaN with None for JSON serialization
+                    # Replace NaN with None for proper NULL handling
                     row_dict = {k: (None if pd.isna(v) else v) for k, v in row_dict.items()}
                     
+                    # ✅ Use psycopg2.extras.Json for native JSONB insertion
                     cursor.execute(
                         """
                         INSERT INTO data_records (dataset_id, row_data)
                         VALUES (%s, %s)
                         """,
-                        (dataset_id, json.dumps(row_dict))
+                        (dataset_id, Json(row_dict))
                     )
                     rows_inserted += 1
                 
@@ -151,8 +152,11 @@ async def upload_dataset(file: UploadFile = File(...)):
 # ---------------------------
 @router.post("/run-checks/{dataset_id}")
 def run_checks(dataset_id: int):
+    logger.info(f"🔍 Running quality checks for dataset_id={dataset_id}")
+    
     try:
         with get_db() as cursor:
+            # Query JSONB data (psycopg2 auto-decodes to Python dicts)
             cursor.execute(
                 "SELECT row_data FROM data_records WHERE dataset_id = %s",
                 (dataset_id,)
@@ -160,14 +164,19 @@ def run_checks(dataset_id: int):
             records = cursor.fetchall()
             
             if not records:
+                logger.warning(f"⚠️ No records found for dataset_id={dataset_id}")
                 raise HTTPException(status_code=404, detail="No records found")
             
+            logger.info(f"📊 Retrieved {len(records)} records from database")
+            
+            # Run quality checks (records are already Python dicts from JSONB)
             raw_results = run_data_quality_checks(records)
             
             checks = []
             failed = 0
             total = len(raw_results)
             
+            # Save results and prepare response
             for check_type, issue_count in raw_results.items():
                 status = "PASS" if issue_count == 0 else "FAIL"
                 if status == "FAIL":
@@ -179,6 +188,7 @@ def run_checks(dataset_id: int):
                     "failed_rows": issue_count
                 })
                 
+                # Store validation results
                 cursor.execute(
                     """
                     INSERT INTO validation_results (dataset_id, check_type, issue_count)
@@ -188,6 +198,8 @@ def run_checks(dataset_id: int):
                 )
             
             overall_score = int(((total - failed) / total) * 100) if total > 0 else 0
+            
+            logger.info(f"✅ Quality checks completed: score={overall_score}%, failed={failed}/{total}")
         
         return {
             "dataset_id": dataset_id,
@@ -198,7 +210,7 @@ def run_checks(dataset_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to run checks: {str(e)}")
+        logger.error(f"❌ Failed to run checks for dataset_id={dataset_id}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
