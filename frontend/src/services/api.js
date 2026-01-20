@@ -1,4 +1,4 @@
-const BASE_URL = "http://127.0.0.1:8000";
+const BASE_URL = "https://data-quality-monitor-1.onrender.com";
 
 export async function uploadDataset(file) {
   const formData = new FormData();
@@ -38,8 +38,9 @@ export async function getLatestDataset() {
 
   return response.json();
 }
+
 export async function fetchDashboardStats() {
-  const response = await fetch("http://127.0.0.1:8000/dashboard/summary");
+  const response = await fetch(`${BASE_URL}/dashboard/summary`);
 
   if (!response.ok) {
     throw new Error("Failed to load dashboard stats");
