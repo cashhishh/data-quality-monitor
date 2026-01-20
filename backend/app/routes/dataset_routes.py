@@ -35,7 +35,6 @@ def create_dataset(dataset_name: str):
 
         dataset_id = cursor.fetchone()[0]
         conn.commit()
-        cursor.close()
         conn.close()
 
         return {
@@ -84,7 +83,6 @@ def upload_dataset(file: UploadFile = File(...)):
             )
 
         conn.commit()
-        cursor.close()
         conn.close()
 
         return {
@@ -143,7 +141,6 @@ def run_checks(dataset_id: int):
         overall_score = int(((total - failed) / total) * 100)
 
         conn.commit()
-        cursor.close()
         conn.close()
 
         return {
@@ -175,7 +172,6 @@ def get_latest_dataset():
         )
 
         row = cursor.fetchone()
-        cursor.close()
         conn.close()
 
         return {"dataset_id": row[0] if row else None}
