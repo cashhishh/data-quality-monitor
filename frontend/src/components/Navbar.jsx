@@ -10,6 +10,8 @@ export default function Navbar() {
       <div className="nav-container">
         <div className="logo">Data Quality Monitor</div>
 
+
+        
         <div className={`nav-links ${open ? "open" : ""}`}>
           <Link to="/" onClick={() => setOpen(false)}>Home</Link>
           <Link to="/datasets" onClick={() => setOpen(false)}>Datasets</Link>
